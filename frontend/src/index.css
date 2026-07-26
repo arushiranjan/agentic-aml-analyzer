@@ -1,0 +1,66 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+/*
+  Dark, professional banking/security-console theme — the aesthetic target
+  is Microsoft Sentinel / Palantir / Datadog / Linear, not a flashy SaaS
+  gradient landing page. Deep near-black surfaces, a single restrained
+  blue accent, muted text hierarchy, subtle borders instead of heavy
+  shadows.
+*/
+:root {
+  --background: 222 25% 6%;
+  --surface: 222 22% 9%;
+  --surface-hover: 222 20% 12%;
+  --border: 222 15% 18%;
+  --foreground: 210 20% 92%;
+  --muted: 222 15% 14%;
+  --muted-foreground: 215 12% 58%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 222 25% 6%;
+  --accent: 217 91% 60%;
+  --danger: 0 72% 58%;
+  --warning: 38 92% 55%;
+  --success: 152 55% 45%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  font-feature-settings: "cv11", "ss01";
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+
+/* Light glassmorphism used sparingly on panels, per design brief ("use
+   glassmorphism lightly") — not on every card, just key surfaces. */
+.glass {
+  background: hsl(var(--surface) / 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.mono-tabular {
+  font-variant-numeric: tabular-nums;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
