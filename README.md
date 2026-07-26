@@ -18,15 +18,11 @@
 
 ---
 
-> **Implementation status: real integration complete.** Backend (FastAPI +
-> SQLite + SQLAlchemy) and frontend (Next.js + TS + Tailwind) run against
-> **real EnergyPlus, real Ollama, real FastMCP, and real LangGraph** when
-> configured (see [SETUP_GUIDE.md](SETUP_GUIDE.md)), or against zero-setup
-> mocks by default (`USE_MOCK_ENERGYPLUS=true` / `USE_MOCK_LLM=true` in
-> `.env`) — both paths use the exact same interfaces, so no code changes
-> are needed to switch. `backend/requirements.txt` is a verified,
-> conflict-free dependency set for **Python 3.11** — see "Common Dependency
-> Issues" below if you're upgrading from an older copy of this repo.
+> **Implementation status: Phase 1 complete** (see `phases.md`). Backend
+> (FastAPI + SQLite + SQLAlchemy) and frontend (Next.js + TS + Tailwind)
+> are runnable now, using mock EnergyPlus/Ollama/LangGraph/FastMCP services
+> behind the same interfaces the real integrations will use later
+> (`USE_MOCK_ENERGYPLUS` / `USE_MOCK_LLM` in `.env`).
 
 ## 🚀 Quick Start (Phase 1)
 
@@ -323,328 +319,372 @@ alembic upgrade head
 2. Run the installer (default: `C:\EnergyPlusV24-1-0\` on Windows)
 3. Add to your system PATH
 4. Verify: `energyplus --version`
+## 🏢 Building Model
 
-### Building Model
+The project uses the **DOE Small Office Reference Building** model (`RefBldgSmallOfficeNew2004_Chicago.idf`) executed through the **real EnergyPlus simulation engine**.
 
-We use the **DOE Small Office Reference Building** (`RefBldgSmallOfficeNew2004_Chicago.idf`):
-- 511 m² single-story office with 5 thermal zones
-- Packaged HVAC system (PSZ-AC)
-- Standard occupancy and lighting schedules
-- Located in `energyplus/models/`
+### Building Specifications
 
-### Weather File
+- Building Model: `RefBldgSmallOfficeNew2004_Chicago.idf`
+- Single-story commercial office building
+- Approximately **511 m²** floor area
+- Five thermal zones
+- Packaged Single Zone Air Conditioner (PSZ-AC)
+- Standard DOE occupancy, lighting, and HVAC schedules
+- Real EnergyPlus simulation executed during every optimization cycle
 
-We use the **Chicago TMY3** weather file:
-- `USA_IL_Chicago-OHare.Intl.AP.725300_TMY3.epw`
-- 8,760 hours of typical meteorological year data
-- Located in `energyplus/weather/`
-- Change weather by replacing the EPW file and updating `.env`
+The building model path is configured through:
 
-### Why No FMU?
-
-FMU (Functional Mock-up Unit) is for real-time co-simulation. Our approach uses sequential batch simulation (modify IDF → run → read outputs → repeat), which is simpler and sufficient for AI-driven optimization.
-
-📖 **Full details**: [docs/energyplus.md](docs/energyplus.md)
+```env
+ENERGYPLUS_IDF=<absolute_path_to_idf_file>
+```
 
 ---
 
-## 🤖 Ollama Setup
+## 🌦 Weather Data
 
-### Installation
+The system uses a real **EnergyPlus EPW (EnergyPlus Weather)** file to simulate realistic outdoor environmental conditions.
+
+### Current Weather Dataset
+
+- **File:** `USA_IL_Chicago-Midway.AP.725340_TMY.epw`
+- Typical Meteorological Year (TMY)
+- Hourly weather observations
+- Loaded automatically from the configured path in `backend/.env`
+
+### Downloading Weather Data
+
+EnergyPlus weather files can be downloaded from the official EnergyPlus Weather repository.
+
+**Website:**
+https://energyplus.net/weather
+
+### Steps
+
+1. Open the EnergyPlus Weather website.
+2. Select the **Region**.
+3. Select the **Country**.
+4. Select the **City** nearest to your building location.
+5. Download the required **EPW (.epw)** weather file.
+6. Extract the downloaded ZIP file (if applicable).
+7. Update the weather file path in `backend/.env`:
+
+```env
+ENERGYPLUS_EPW=<absolute_path_to_weather_file.epw>
+```
+
+8. Restart the backend application.
+
+The next simulation will automatically use the newly selected weather dataset.
+
+### Example
+
+```env
+ENERGYPLUS_EPW=E:/EnergyPlusV26-1-0/WeatherData/USA_IL_Chicago-Midway.AP.725340_TMY.epw
+```
+
+or
+
+```env
+ENERGYPLUS_EPW=E:/Weather/IND_Patna.424920_ISHRAE.epw
+```
+
+EnergyPlus supports weather datasets for thousands of locations worldwide, allowing the same building model to be simulated under different climatic conditions simply by replacing the EPW file. :contentReference[oaicite:0]{index=0}
+
+
+### Weather Parameters
+
+The EPW file provides:
+
+- Outdoor Dry Bulb Temperature
+- Relative Humidity
+- Wind Speed
+- Wind Direction
+- Atmospheric Pressure
+- Direct & Diffuse Solar Radiation
+- Sky Conditions
+
+These weather conditions are automatically supplied to EnergyPlus during each simulation and directly influence:
+
+- Indoor thermal comfort
+- HVAC operation
+- Building energy consumption
+- Cooling and heating loads
+
+To simulate another location, simply replace the EPW file and update:
+
+```env
+ENERGYPLUS_EPW=<absolute_path_to_epw_file>
+```
+
+---
+
+## ⚡ Real EnergyPlus Integration
+
+The application uses the **real EnergyPlus simulation engine** instead of a mocked simulator.
+
+### Simulation Workflow
+
+```
+Read Building Model
+        │
+        ▼
+Load Weather Data
+        │
+        ▼
+Run EnergyPlus
+        │
+        ▼
+Generate Simulation Outputs
+        │
+        ▼
+Parse Results
+        │
+        ▼
+Store Metrics
+        │
+        ▼
+Update Dashboard
+```
+
+Each simulation generates official EnergyPlus output files including:
+
+- `eplusout.csv`
+- `eplusout.sql`
+- `eplusout.err`
+- `eplusout.eso`
+- `eplustbl.htm`
+
+Simulation outputs are automatically stored in:
+
+```
+backend/energyplus/output/<simulation_id>/
+```
+
+---
+
+## 🤖 Ollama Setup (Optional)
+
+The project supports both **Mock LLM** and **Ollama**.
+
+### Mock Mode (Default)
+
+The application runs without installing any LLM.
+
+```env
+USE_MOCK_LLM=true
+```
+
+---
+
+### Real Ollama Setup
+
+Install Ollama:
 
 ```bash
 # Download from https://ollama.com/download
-# Run the installer
 
-# Verify:
 ollama --version
 ```
 
-### Download Qwen3 8B
+Download the model:
 
 ```bash
 ollama pull qwen3:8b
 
-# Verify:
 ollama list
-# Should show: qwen3:8b
-
-# Test:
-ollama run qwen3:8b "What is building energy optimization?"
 ```
 
-### Resource Requirements
+Configure:
 
-| Resource | Minimum | Recommended |
-|---|---|---|
-| RAM | 8 GB | 16 GB |
-| VRAM | 5 GB | 8 GB |
-| Disk | 5 GB | 10 GB |
+```env
+USE_MOCK_LLM=false
+OLLAMA_BASE_URL=http://localhost:11434
+LLM_MODEL=qwen3:8b
+```
 
-### Enabling RealLLMService
+Verify:
 
-`backend/app/services/llm_service.py` ships both `MockLLMService` (default)
-and `RealLLMService` (real Ollama, via the official `ollama` Python
-package). To switch:
+```
+GET /api/v1/system/status
+```
 
-1. Make sure Ollama is running (`ollama serve`, or just open the desktop app).
-2. `ollama pull qwen3:8b` (or whatever `LLM_MODEL` you set).
-3. In `backend/.env`, set `OLLAMA_BASE_URL`, `LLM_MODEL`, and
-   `USE_MOCK_LLM=false`.
-4. Restart the backend.
+Expected:
 
-If Ollama isn't reachable or the model isn't pulled, the backend logs a
-warning and automatically falls back to `MockLLMService` — it never fails
-to boot. Check `GET /api/v1/system/status` → `"ollama"` to see which
-implementation is active.
-
-📖 **Full details**: [docs/llm.md](docs/llm.md)
+```json
+"ollama": {
+    "status": "running"
+}
+```
 
 ---
 
 ## 🗄️ Database
 
-SQLite database with 8 tables:
+The backend uses **SQLite** to persist simulation history, optimization decisions, weather information, and dashboard metrics.
 
-| Table | Purpose |
-|---|---|
-| `simulations` | Simulation run history |
-| `sensor_readings` | Zone sensor data |
-| `weather` | Weather conditions |
-| `hvac_actions` | HVAC control changes |
-| `optimization_metrics` | Post-optimization metrics |
-| `baseline_metrics` | Baseline comparison data |
-| `llm_reasoning` | Agent reasoning logs |
-| `reports` | Generated reports |
+### Database Tables
 
-📖 **Schema & ER diagram**: [docs/database.md](docs/database.md)
+| Table | Description |
+|--------|-------------|
+| simulations | Simulation execution history |
+| sensor_readings | Building sensor values |
+| weather | Outdoor weather data |
+| hvac_actions | HVAC control history |
+| optimization_metrics | AI optimization metrics |
+| baseline_metrics | Baseline comparison |
+| llm_reasoning | Agent reasoning logs |
+| reports | Generated optimization reports |
 
 ---
 
-## 🔧 MCP Tools
+## 🔧 FastMCP Integration
 
-9 tools exposed via FastMCP:
+The backend exposes **15 MCP tools** used by the AI workflow.
 
 | Tool | Purpose |
-|---|---|
-| `read_building_state` | Get zone temperatures, humidity, occupancy |
-| `read_weather` | Get outdoor weather conditions |
-| `run_simulation` | Execute EnergyPlus simulation |
-| `update_hvac` | Modify HVAC setpoints and mode |
-| `update_lighting` | Adjust lighting levels |
-| `update_setpoints` | Batch update setpoints |
-| `analyze_comfort` | Calculate PMV/PPD comfort indices |
-| `generate_report` | Create optimization reports |
-| `get_historical_metrics` | Query historical data |
-
-📖 **Full tool docs**: [docs/mcp.md](docs/mcp.md)
+|------|----------|
+| read_building_state | Read current building state |
+| get_building_state | Retrieve processed building metrics |
+| read_weather | Read current weather |
+| get_weather | Weather API |
+| run_simulation | Execute EnergyPlus simulation |
+| update_hvac | Update HVAC configuration |
+| control_hvac | HVAC control actions |
+| update_lighting | Lighting optimization |
+| update_setpoints | Batch temperature updates |
+| analyze_comfort | Comfort analysis |
+| generate_report | Generate optimization report |
+| get_historical_metrics | Historical simulation data |
+| get_energy_metrics | Energy statistics |
+| get_occupancy | Occupancy information |
+| forecast_energy | Energy prediction |
 
 ---
 
-## 🤖 LangGraph Agents
+## 🤖 LangGraph Agent Workflow
 
-9 specialized agents orchestrated by LangGraph:
+The optimization pipeline is orchestrated using **LangGraph**.
 
-```mermaid
-graph LR
-    SA["Sensor"] --> WA["Weather"]
-    WA --> BSA["Building State"]
-    BSA --> RA["Reasoning"]
-    RA --> PA["Planner"]
-    PA --> CA["Control"]
-    CA --> VA["Validation"]
-    VA -->|Pass| REP["Reporting"]
-    VA -->|Fail| RA
-
-    style RA fill:#8b5cf6,color:#fff
-    style CA fill:#f59e0b,color:#000
-    style VA fill:#ef4444,color:#fff
+```
+Sensor Agent
+      │
+Weather Agent
+      │
+Building State Agent
+      │
+Reasoning Agent
+      │
+Planning Agent
+      │
+Control Agent
+      │
+Validation Agent
+      │
+Reporting Agent
 ```
 
-📖 **Agent prompts & architecture**: [docs/agents.md](docs/agents.md)
+Each optimization cycle:
+
+- Reads building state
+- Retrieves weather information
+- Executes EnergyPlus
+- Collects simulation outputs
+- Performs AI reasoning
+- Generates HVAC recommendations
+- Validates recommendations
+- Updates dashboard metrics
+- Stores results in the database
 
 ---
 
-## 📊 Dashboard
+## 📊 Interactive Dashboard
 
-Enterprise-grade monitoring dashboard inspired by Datadog, Grafana, and Tesla Energy.
+The web dashboard provides real-time monitoring and control.
 
-**Features**:
-- Dark theme with glassmorphism (`#0F172A` background)
-- Real-time metrics via WebSocket
-- Energy, comfort, HVAC, weather, carbon visualizations
-- AI reasoning panel with tool call visibility
-- Decision timeline
-- Historical trend analysis
-- Sensor data table
+### Features
 
-📖 **Design spec**: [docs/dashboard.md](docs/dashboard.md)
+- Live Energy Consumption
+- Indoor Temperature
+- Outdoor Temperature
+- Comfort Score
+- Carbon Emissions
+- HVAC Status
+- AI Optimization Status
+- Simulation Status
+- Energy Trend Charts
+- Indoor vs Outdoor Temperature Graphs
+- Historical Metrics
+- Run Simulation
+- Run AI Cycle
 
 ---
 
-## 📡 API Reference
+## 📡 REST API
 
 | Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/v1/system/health` | Health check |
-| `GET` | `/api/v1/system/status` | Component status |
-| `GET` | `/api/v1/building/state` | Current building state |
-| `GET` | `/api/v1/sensors/` | Sensor readings |
-| `GET` | `/api/v1/weather/current` | Weather conditions |
-| `POST` | `/api/v1/simulation/run` | Run simulation |
-| `GET` | `/api/v1/energy/metrics` | Energy metrics |
-| `GET` | `/api/v1/comfort/metrics` | Comfort metrics |
-| `POST` | `/api/v1/agents/run-cycle` | Trigger optimization (now runs the full baseline → AI → optimized → comparison workflow, see below) |
-| `GET` | `/api/v1/optimization/comparison/latest` | Latest baseline vs optimized comparison |
-| `GET` | `/api/v1/optimization/comparison/history` | Last N comparison reports |
-| `GET` | `/api/v1/optimization/comparison/export?format=json\|csv` | Download the latest comparison |
-| `GET` | `/api/v1/agents/reasoning` | Agent reasoning logs |
-| `GET` | `/api/v1/reports/` | Reports |
-| `WS` | `/api/v1/ws/live` | Real-time updates |
+|--------|----------|-------------|
+| GET | `/api/v1/system/health` | Health check |
+| GET | `/api/v1/system/status` | System status |
+| GET | `/api/v1/building/state` | Building state |
+| GET | `/api/v1/weather/current` | Current weather |
+| GET | `/api/v1/energy/metrics` | Energy metrics |
+| GET | `/api/v1/comfort/metrics` | Comfort metrics |
+| POST | `/api/v1/simulation/run` | Execute EnergyPlus |
+| POST | `/api/v1/agents/run-cycle` | Run optimization |
+| GET | `/api/v1/agents/reasoning` | AI reasoning logs |
+| GET | `/api/v1/reports` | Optimization reports |
+| WS | `/api/v1/ws/live` | Real-time updates |
 
-Full API documentation available at `http://localhost:8000/docs` after starting the backend.
-
-📖 **Full API spec**: [docs/api.md](docs/api.md)
-
----
-
-## 🔄 Closed-Loop Flow
+Interactive API documentation:
 
 ```
-Observe → Read Sensors → Reason → Plan → Execute MCP Tools →
-Modify Building → Run EnergyPlus → Collect Metrics → Validate →
-Compare → Report → Repeat
+http://localhost:8000/docs
 ```
 
-Every iteration is logged. Failed validations trigger retries (max 3). All decisions, reasoning chains, and metrics are stored in the database and displayed on the dashboard.
-
-📖 **Detailed flow**: [docs/closed-loop.md](docs/closed-loop.md)
-
 ---
 
----
-
-## 📊 Quantitative Savings Dashboard
-
-Every click of **Run AI Cycle** now runs the complete comparison workflow
-automatically, no extra step required:
+## 🔄 Closed-Loop Optimization
 
 ```
-Baseline EnergyPlus run → save baseline_metrics
-    ↓
-AI agent cycle (same LangGraph graph as before — unchanged)
-    ↓
-Optimized EnergyPlus run (with the AI's HVAC changes applied) → save optimization_metrics
-    ↓
-Compute % savings + comfort-boundary check → store as a Report(report_type="comparison")
+Read Sensors
+      │
+Read Weather
+      │
+Run EnergyPlus
+      │
+Extract Simulation Metrics
+      │
+AI Reasoning
+      │
+Generate HVAC Recommendations
+      │
+Validate Decisions
+      │
+Store Results
+      │
+Update Dashboard
+      │
+Repeat
 ```
 
-Comparison fields computed: `energy_saved_kwh`, `energy_saved_percent`,
-`hvac_saved_percent`, `cooling_saved_percent`, `heating_saved_percent`,
-`carbon_reduction_percent`, `avg_temp_diff_c`, `pmv_diff`, `ppd_diff`, and
-`comfort_maintained` (indoor temp 20–26°C, |PMV| ≤ 0.5, PPD ≤ 15%).
-
-No new tables or migrations were needed — `baseline_metrics`,
-`optimization_metrics`, and `reports` already had every column required;
-`Report.recommendations` (previously unused free text) now holds the full
-baseline/optimized/comparison JSON for `/comparison/latest` to serve back.
-
-The Overview page's new **Quantitative Savings** section shows this as
-cards (baseline/optimized/saved energy, HVAC savings, carbon reduction,
-comfort status) plus three bar charts (energy, temperature, comfort),
-green when the optimized value is better — with **JSON** / **CSV** export
-buttons backed by `/api/v1/optimization/comparison/export`.
+Every optimization cycle is logged and stored for future analysis.
 
 ---
 
-## 🗺️ Development Roadmap
+## 🗺️ Development Status
 
-| Phase | Description | Status |
-|---|---|---|
-| **Phase 0** | Architecture & Project Planning | ✅ Complete |
-| **Phase 1** | Project Foundation (FastAPI + Next.js + DB) | ⬜ Planned |
-| **Phase 2** | EnergyPlus Integration | ⬜ Planned |
-| **Phase 3** | Backend APIs & Dashboard | ⬜ Planned |
-| **Phase 4** | AI Agent + MCP Integration | ⬜ Planned |
-| **Phase 5** | Closed-Loop Optimization | ⬜ Planned |
-| **Phase 6** | Enterprise Dashboard Polish | ⬜ Planned |
-| **Phase 7** | Finalization & Submission | ⬜ Planned |
-
----
-
-## 🔮 Future Work
-
-- **Multi-building portfolio management** — optimize across multiple buildings
-- **Real-time sensor integration** — BACnet/Modbus IoT connectivity
-- **Predictive pre-conditioning** — ML-based weather prediction for proactive HVAC
-- **Renewable energy integration** — solar PV, battery storage optimization
-- **Occupancy prediction** — ML-based occupancy forecasting
-- **Digital twin** — 3D building visualization with real-time data overlay
-- **Edge deployment** — Run on Raspberry Pi / Jetson for on-site inference
-- **PostgreSQL migration** — For production multi-building deployments
+| Phase | Status |
+|--------|--------|
+| Architecture & Planning | ✅ Complete |
+| FastAPI Backend | ✅ Complete |
+| SQLite Database | ✅ Complete |
+| Next.js Dashboard | ✅ Complete |
+| Real EnergyPlus Integration | ✅ Complete |
+| FastMCP Integration | ✅ Complete |
+| LangGraph Workflow | ✅ Complete |
+| Closed-Loop Optimization | ✅ Complete |
+| Ollama Integration | 🟡 Optional (Mock Supported) |
 
 ---
 
-## 📄 License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
-
----
-
-<p align="center">
-  <strong>Built for the Eco-Loop Building Agents Hackathon</strong><br/>
-  <em>Autonomous AI-driven building energy optimization</em>
-</p>
-
----
-
-## 🛠️ Manual Steps Required (Real EnergyPlus / Ollama / MCP)
-
-The app runs with **zero setup** using mock services (`USE_MOCK_ENERGYPLUS=true`,
-`USE_MOCK_LLM=true` in `.env`). To switch on real integrations, edit
-`backend/.env` (copy from `.env.example` if missing):
-
-**Step 1 — Real EnergyPlus**
-- Open `backend/.env`.
-- Set `ENERGYPLUS_DIR` to your install folder.
-  Example (Windows): `E:/EnergyPlusV24-1-0`
-- Set `ENERGYPLUS_IDF` to an absolute path to a `.idf` model.
-  Example: `E:/EnergyPlusV24-1-0/ExampleFiles/RefBldgSmallOfficeNew2004_Chicago.idf`
-- Set `ENERGYPLUS_EPW` to an absolute path to a `.epw` weather file.
-  Example: `E:/EnergyPlusV24-1-0/WeatherData/USA_IL_Chicago-OHare.Intl.AP.725300_TMY3.epw`
-- Set `USE_MOCK_ENERGYPLUS=false`.
-- Verify: restart the backend, call `GET /api/v1/system/status` — `energyplus.status` should read `"real"` (not `"mock"`). If it still says mock, check the backend console/log for a fallback warning explaining why.
-
-**Step 2 — Ollama (optional, for real LLM reasoning)**
-- Install Ollama, run `ollama serve` (or open the desktop app), then `ollama pull qwen3:8b` (or whatever model you set `LLM_MODEL` to).
-- Set `OLLAMA_BASE_URL` if not on `http://localhost:11434`.
-- Set `USE_MOCK_LLM=false`.
-- Verify: `GET /api/v1/system/status` — `ollama.status` should read `"real"` (not `"mock"`). If it still says mock, check the backend log for a fallback warning (Ollama unreachable, or the model isn't pulled).
-
-**Step 3 — FastMCP standalone server (optional)**
-- Only needed to expose tools to an external MCP client (Claude Desktop, `mcp inspect`). The dashboard/API do not require this running.
-- `cd backend && python -m app.mcp.server`
-- Set `MCP_TRANSPORT=sse` + `MCP_HOST`/`MCP_PORT` in `.env` for network access instead of stdio.
-
-**Step 4 — Install Python packages**
-- Use **Python 3.11** (not 3.13 — see "Common Dependency Issues" below).
-- `cd backend && python -m venv venv && source venv/bin/activate` (Windows: `venv\Scripts\activate`)
-- `pip install -r requirements.txt` — this is a verified, conflict-free pin set (tested with a clean `pip install` producing no `ResolutionImpossible` errors).
-
-### Common Dependency Issues
-| Symptom | Fix |
-|---|---|
-| `ResolutionImpossible` / conflicting `mcp` versions | Older copies of this repo pinned `mcp==1.6.0`, but `fastmcp==2.3.4` requires `mcp>=1.8.1,<2.0.0`. Use the `mcp==1.9.4` pin in the current `requirements.txt`. |
-| `ResolutionImpossible` / conflicting `python-dotenv` versions | Older copies pinned `python-dotenv==1.0.1`, but `fastmcp==2.3.4` requires `python-dotenv>=1.1.0`. Use the `python-dotenv==1.1.0` pin in the current `requirements.txt`. |
-| Install works on 3.11/3.12 but fails on 3.13 | This stack (especially `langgraph`/`langchain-core`/`mcp`) is only validated on 3.11 and 3.12. Use `python3.11 -m venv venv` (or 3.12) to create the virtualenv. |
-| `ModuleNotFoundError: fastmcp` / `langgraph` / `ollama` | Run `pip install -r requirements.txt` inside `backend/` with the venv activated. |
-
-### Common Runtime Errors
-| Symptom | Fix |
-|---|---|
-| `energyplus.status` still `mock` after setting `false` | Check `ENERGYPLUS_DIR` has the actual executable; check `ENERGYPLUS_IDF`/`ENERGYPLUS_EPW` point to real files; check backend log for the fallback warning. |
-| `RuntimeError: EnergyPlus exited with code 1` | Open the run's output folder under `energyplus/output/<sim_id>/`, check `eplusout.err`. |
-| Building state zones empty in real mode | Your IDF has no `Output:Variable` for `Zone Mean Air Temperature`; add one (Timestep frequency) and re-run. |
-| Energy metrics all 0 in real mode | Your IDF has no `Output:Meter` for `Electricity:Facility` etc.; add one and re-run. |
-| `ollama.status` still `mock` after setting `false` | Check Ollama is running (`ollama serve`) at `OLLAMA_BASE_URL`; check the model in `LLM_MODEL` has been pulled (`ollama list`); check backend log for the fallback warning. |
-| `ollama._types.ResponseError` / connection refused | Ollama isn't running, or `OLLAMA_BASE_URL` points to the wrong host/port. |
