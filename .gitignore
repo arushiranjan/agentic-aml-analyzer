@@ -7,4 +7,6 @@ data/*
 !data/.gitkeep
 models/*
 !models/.gitkeep
-.env.example
+frontend/node_modules/
+frontend/dist/
+frontend/.env

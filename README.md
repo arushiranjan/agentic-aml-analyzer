@@ -1,35 +1,43 @@
-# AI-Powered Suspicious Activity Detection Agent (AML)
+# Sentinel AML — AI-Powered Suspicious Activity Detection Agent (v3)
 
 An **agentic AI** system for Anti-Money-Laundering (AML) suspicious activity
-detection. Upload a banking transaction CSV, then ask natural-language
-questions — a single planning agent decides which analysis tools are
-actually needed for each question and runs only those, instead of a fixed
-sequential pipeline.
+detection, now with a modern **React + TypeScript** enterprise dashboard in
+front of the same, unmodified AI pipeline: a single planning agent that
+decides which analysis tools are actually needed for each question and
+runs only those, instead of a fixed sequential pipeline.
 
-> Built for a hackathon. Runs fully offline (rule-engine + keyword-fallback
-> mode) with zero API key, and upgrades to full LLM-powered planning and
-> explanations the moment you add an `OPENAI_API_KEY`.
+> **v3 changelog:** the Streamlit frontend has been completely replaced
+> with a React + Vite + TailwindCSS + shadcn-style + Framer Motion +
+> Recharts dashboard (dark, professional, Sentinel/Palantir/Linear-style
+> theme). The Python AI pipeline — planner, context builder, executor,
+> rule engine, feature engineering, Isolation Forest, risk scoring,
+> explanation engine — is **untouched**, other than three small, additive,
+> read-only endpoints and two additive data fields added purely to feed
+> the new dashboard (see [What Changed on the Backend](#what-changed-on-the-backend-v3)).
+> Two real bugs from the old Streamlit UI are fixed in this rewrite — see
+> [Bugs Fixed in v3](#bugs-fixed-in-v3).
 
 ---
 
 ## Table of Contents
 
 1. [Project Overview](#project-overview)
-2. [Architecture](#architecture)
-3. [Folder Structure](#folder-structure)
-4. [Setup & Installation](#setup--installation)
-5. [Environment Variables](#environment-variables)
-6. [How to Obtain an OpenAI API Key](#how-to-obtain-an-openai-api-key)
-7. [Running the Backend](#running-the-backend)
-8. [Running the Frontend](#running-the-frontend)
-9. [Running with the Sample Dataset](#running-with-the-sample-dataset)
-10. [How the Agent Works](#how-the-agent-works)
-11. [How the Rules Work](#how-the-rules-work)
-12. [How the ML Model Works](#how-the-ml-model-works)
-13. [How Risk Scoring Works](#how-risk-scoring-works)
-14. [API Reference](#api-reference)
-15. [Screenshots](#screenshots)
-16. [Future Improvements](#future-improvements)
+2. [Architecture Diagram](#architecture-diagram)
+3. [Frontend](#frontend)
+4. [Backend](#backend)
+5. [Bugs Fixed in v3](#bugs-fixed-in-v3)
+6. [What Changed on the Backend (v3)](#what-changed-on-the-backend-v3)
+7. [Folder Structure](#folder-structure)
+8. [Setup & Installation](#setup--installation)
+9. [Running the Backend](#running-the-backend)
+10. [Running the Frontend](#running-the-frontend)
+11. [Training Models](#training-models)
+12. [Using Existing Models](#using-existing-models)
+13. [API Endpoints](#api-endpoints)
+14. [Screenshots](#screenshots)
+15. [Future Improvements](#future-improvements)
+16. [Dataset Citation](#dataset-citation)
+17. [Hackathon Notes](#hackathon-notes)
 
 ---
 
@@ -40,124 +48,201 @@ ad-hoc questions like *"find suspicious customers"* or *"show me
 structuring patterns"* without waiting for a data scientist to write a new
 script every time.
 
-This project is **one intelligent planning agent** sitting in front of six
-specialized tools (EDA, Feature Engineering, Rule Engine, ML Anomaly
-Detection, Risk Scoring, Explanation Generator). The agent reads the
-question, decides which tools are relevant, executes only those, and
-returns an explainable answer — not a canned report.
+The system is **one intelligent planning agent** sitting in front of seven
+specialized tools (EDA, Feature Engineering, Graph Intelligence, Rule
+Engine, Isolation Forest anomaly detection, Risk Scoring, Explanation
+Generator). The agent reads the question, plans which tools are relevant
+**and why**, executes only those, and returns an explainable,
+evidence-grounded answer — surfaced through a modern enterprise console
+instead of a Streamlit script.
 
-## Architecture
+## Architecture Diagram
 
 ```
-User
-  │
-  ▼
-Streamlit Dashboard  (frontend/app.py)
-  │  HTTP
-  ▼
-FastAPI              (backend/main.py)
-  │
-  ▼
-AI Planner Agent     (agent/planner.py)   -- decides WHICH tools to run
-  │
-  ▼
-Tool Executor        (tools/executor.py) -- runs ONLY those tools, in dependency order
-  │
-  ├── EDA Tool                 (tools/eda_tool.py)
-  ├── Feature Engineering Tool (tools/feature_engineering.py)
-  ├── Rule Engine              (tools/rule_engine.py)
-  ├── ML Anomaly Detection     (tools/ml_tool.py)
-  ├── Risk Scoring             (tools/risk_scoring.py)
-  └── Explanation Generator    (tools/explanation_tool.py)
-  │
-  ▼
-Response (JSON) → rendered by Streamlit
+┌─────────────────────────────────────────────────────────────────────┐
+│  React + TypeScript SPA (frontend/)                                 │
+│  Dashboard · Investigation · Customers · Analytics · Models ·       │
+│  Settings · 404 · Loading Screen                                    │
+│  React Router · Context API (dataset state) · Axios · Recharts ·    │
+│  Framer Motion · Tailwind + shadcn-style primitives                 │
+└───────────────────────────────┬───────────────────────────────────┘
+                                 │ HTTP (axios) — /api/* proxied to :8000 in dev
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  FastAPI (backend/main.py)                                          │
+│  /upload /chat /eda /risk-report /train /customer/{id} /timeline    │
+│  /history/{id} /graph/{id}  +  v3-only: /dataset/summary            │
+│  /system/status /model/status  (read-only, additive, see below)     │
+└───────────────────────────────┬───────────────────────────────────┘
+                                 ▼
+                    AI Planner Agent  (agent/planner.py)         — decides WHICH tools + WHY
+                                 │
+                    Context Builder   (agent/context_builder.py) — resolves filters + customer_id
+                                 │
+                    Tool Executor     (tools/executor.py)        — runs ONLY the resolved tools
+                                 │
+        ┌────────────┬──────────┼───────────┬────────────┬─────────────┐
+        ▼            ▼          ▼           ▼            ▼             ▼
+      EDA Tool   Feature Eng  Graph Intel  Rule Engine  Isolation   Explanation
+                                                          Forest ML    Engine
+                                                        (cached per
+                                                          dataset)
 ```
 
-Full technical write-up: [`docs/architecture.md`](docs/architecture.md).
+**Nothing in the box below the FastAPI line changed in v3.** The React
+app is a pure HTTP client over the exact same AI pipeline documented in
+[`docs/architecture.md`](docs/architecture.md).
+
+## Frontend
+
+- **Stack:** React 18 + TypeScript, Vite, TailwindCSS, hand-authored
+  shadcn/ui-style primitives (`src/components/ui/*` — see note below),
+  Framer Motion, Lucide icons, React Router, Axios, Recharts.
+- **Why hand-authored shadcn-style primitives instead of the shadcn CLI:**
+  the shadcn CLI fetches component source from `ui.shadcn.com` at
+  install time, which isn't reachable from a locked-down build
+  environment. The primitives in `src/components/ui/` (`Button`, `Card`,
+  `Badge`, `Input`, `Progress`, `Separator`, `Tabs`, `Skeleton`) are
+  written in the exact same style shadcn generates — plain Tailwind +
+  `class-variance-authority` + the `cn()` merge helper — so swapping in
+  real shadcn components later is a drop-in replacement if you have CLI
+  access.
+- **Theme:** dark, professional, restrained — a single blue accent, deep
+  near-black surfaces, subtle borders over heavy shadows, light
+  glassmorphism only on the topbar. Modeled on Microsoft Sentinel /
+  Palantir / Datadog / Linear, not a SaaS marketing gradient.
+- **Pages:** Dashboard, Investigation, Customers (Customer Details),
+  Analytics, Models (Model Insights), Settings, 404, and a Suspense-driven
+  Loading Screen shown while each route's code-split chunk loads.
+- **State management:** React Context (`DatasetContext`) holds the active
+  `dataset_id` app-wide (persisted to `sessionStorage`); no Redux needed
+  for an app this size. `src/lib/investigationHistory.ts` persists full
+  investigation results (see [Bugs Fixed](#bugs-fixed-in-v3)).
+- **Type safety:** every backend JSON shape is mirrored in
+  `src/types/index.ts`; `npm run build` runs a full `tsc -b` project
+  build before bundling, so a backend field rename that isn't reflected
+  in the types will fail the build loudly instead of breaking silently
+  in the browser.
+
+## Backend
+
+**Fully preserved from v2** — planner, context builder, executor, rule
+engine (16 importance-weighted rules), feature engineering, graph
+intelligence (hub/mule/bridge detection), Isolation Forest (cached per
+dataset, not retrained per request), risk scoring (confidence + evidence
+panel), and the evidence-grounded explanation engine all behave
+identically to before. See [`docs/architecture.md`](docs/architecture.md)
+for the full module-by-module writeup — none of it changed.
+
+## Bugs Fixed in v3
+
+Two concrete bugs reported against the old Streamlit frontend are fixed
+by this rewrite (not patched around — actually fixed at the root cause):
+
+1. **Dashboard crash on an empty/undefined risk table.** The old
+   Streamlit code selected a fixed set of DataFrame columns
+   (`df_risk.head(10)[["customer_id", ...]]`) which throws a `KeyError`
+   when the risk report is empty (an empty list produces a DataFrame with
+   *zero columns*, so none of the requested column names exist). The
+   React Dashboard and Analytics pages never index into an assumed shape
+   — every list render (`riskRows`, `explanations`, `graph_hits`, etc.) is
+   guarded with `?? []` / length checks and renders an explicit `EmptyState`
+   component instead of crashing.
+2. **Previous chat/investigation answers disappearing.** The old
+   Streamlit Chat page stored only a hardcoded placeholder string ("See
+   results above.") in `st.session_state.chat_history` for the assistant
+   turn, instead of the actual response — so re-rendering an earlier turn
+   showed literally nothing useful (exactly the behavior in the reported
+   screenshot). The new **Investigation** page's history
+   (`src/lib/investigationHistory.ts`) stores the **entire** `ChatResponse`
+   object per query — goal, plan steps, evidence, risk rows, explanations,
+   everything — and every past investigation renders its own fully
+   populated `RiskResultCard`s, permanently, not a summary placeholder.
+
+## What Changed on the Backend (v3)
+
+Per the instruction to preserve every backend behavior, changes were kept
+to the **minimum required for React integration** — three new read-only
+endpoints and two additive (backward-compatible) data fields. Nothing
+existing was renamed, removed, or had its behavior altered; all 34
+pre-existing backend tests still pass unmodified.
+
+| Change | File | Why |
+|---|---|---|
+| `GET /dataset/summary` | `backend/main.py` | Dashboard stat cards (transaction/customer/beneficiary counts) — wraps existing `df` already loaded by `/upload`. |
+| `GET /system/status` | `backend/main.py` | Dashboard "Planner Status" / "Rule Engine Status" cards — reads `agent.planner.VALID_TOOLS` and `config.RULE_IMPORTANCE`, which already existed. |
+| `GET /model/status` | `backend/main.py` | Model Insights page — reads `utils/model_store.py`'s existing cache plus `ml_tool.FEATURE_COLUMNS`. |
+| `trained_at` timestamp | `utils/model_store.py` | Added as a **separate** dict (`_TRAINED_AT`), so the existing `model, scaler, feature_columns = model_store.get(...)` unpacking used by `ml_tool.py` is untouched. |
+| `hourly_txn_counts`, `channel_counts`, `country_counts` | `tools/eda_tool.py` `distribution_data()` | Additive keys only — `amount_histogram` and `daily_txn_counts` (used by v2) are unchanged. Powers the Analytics page's extra charts. |
+| `rule_importance` field | `/system/status` response | Exposes the existing `config.RULE_IMPORTANCE` dict for the Model Insights page's rule-weight chart. |
 
 ## Folder Structure
 
 ```
 project/
 ├── README.md
-├── requirements.txt
-├── .env.example
+├── requirements.txt              # Python deps
+├── .env.example                  # Backend env template
+├── config.py                     # Rule/risk weights (unchanged from v2)
 ├── backend/
-│   ├── __init__.py
-│   └── main.py                  # FastAPI app + endpoints
-├── frontend/
-│   └── app.py                   # Streamlit multi-page dashboard
-├── agent/
-│   ├── __init__.py
-│   ├── planner.py                # THE planning agent (LLM + JSON plan)
-│   └── intent_rules.py           # Keyword fallback when LLM is unavailable
-├── tools/
-│   ├── __init__.py
-│   ├── executor.py                # Runs only the requested tools, in order
-│   ├── eda_tool.py
-│   ├── feature_engineering.py
-│   ├── rule_engine.py
-│   ├── ml_tool.py
-│   ├── risk_scoring.py
-│   └── explanation_tool.py
-├── utils/
-│   ├── __init__.py
-│   ├── llm_client.py             # Swappable LLM provider wrapper
-│   └── data_loader.py            # CSV validation + in-memory dataset store
-├── data/                          # (scratch space for cached artifacts)
-├── models/                        # (scratch space for persisted models, if added)
-├── docs/
-│   └── architecture.md
+│   ├── main.py                   # FastAPI app (+3 new read-only endpoints)
+│   └── __init__.py
+├── frontend/                     # v3: React + TS + Vite (replaces Streamlit)
+│   ├── package.json
+│   ├── vite.config.ts            # Dev proxy: /api -> localhost:8000
+│   ├── tailwind.config.js
+│   ├── tsconfig*.json
+│   ├── .env.example              # VITE_API_BASE_URL
+│   ├── index.html
+│   ├── public/shield.svg
+│   └── src/
+│       ├── main.tsx / App.tsx    # Router + providers
+│       ├── index.css              # Dark theme CSS variables
+│       ├── context/DatasetContext.tsx
+│       ├── lib/
+│       │   ├── api.ts             # Typed Axios wrapper over every endpoint
+│       │   ├── utils.ts           # cn(), formatters
+│       │   └── investigationHistory.ts  # Fixes the "lost answers" bug
+│       ├── types/index.ts         # Mirrors every backend JSON shape
+│       ├── components/
+│       │   ├── ui/                # Hand-authored shadcn-style primitives
+│       │   ├── layout/             # Sidebar, Topbar, AppLayout
+│       │   ├── RiskBadge.tsx, StatCard.tsx, EvidenceList.tsx,
+│       │   ├── ConfidenceGauge.tsx, PlanSteps.tsx, RiskResultCard.tsx,
+│       │   └── LoadingScreen.tsx, EmptyState.tsx
+│       └── pages/
+│           ├── Dashboard.tsx, Investigation.tsx, CustomerDetails.tsx,
+│           ├── Analytics.tsx, ModelInsights.tsx, Settings.tsx, NotFound.tsx
+├── agent/                         # Unchanged: planner.py, context_builder.py, intent_rules.py
+├── tools/                         # Unchanged except additive eda_tool.py fields
+├── utils/                         # Unchanged except additive model_store.py timestamp
+├── data/  models/                 # Scratch space
+├── docs/architecture.md            # Full backend module-by-module writeup (still accurate)
 ├── sample_data/
-│   ├── generate_sample_data.py    # Regenerates the synthetic dataset
-│   └── transactions.csv           # Ready-to-use sample dataset
-└── tests/
-    ├── __init__.py
-    └── test_pipeline.py
+│   ├── generate_sample_data.py     # 11 injected suspicious patterns
+│   └── transactions.csv
+└── tests/test_pipeline.py          # 34 tests — all still passing, unmodified pipeline
 ```
 
 ## Setup & Installation
 
-**Requirements:** Python 3.11+
+**Requirements:** Python 3.11+, Node.js 18+ (tested on Node 22).
 
 ```bash
-# 1. Clone / unzip the project, then cd into it
+# Clone / unzip the project, then cd into it
 cd aml-agent
 
-# 2. Create a virtual environment
+# --- Backend ---
 python3 -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
-
-# 3. Install dependencies
 pip install -r requirements.txt
+cp .env.example .env            # optional: add OPENAI_API_KEY
 
-# 4. Configure environment variables
-cp .env.example .env
-# then open .env and paste your OpenAI key (optional — see below)
+# --- Frontend ---
+cd frontend
+npm install
+cp .env.example .env            # optional: override VITE_API_BASE_URL
 ```
-
-## Environment Variables
-
-| Variable          | Required | Default                | Description                                   |
-|--------------------|----------|-------------------------|------------------------------------------------|
-| `OPENAI_API_KEY`   | No       | (empty)                | Enables LLM-powered planning + explanations.   |
-| `OPENAI_MODEL`     | No       | `gpt-4.1`               | Any chat-completion capable OpenAI model.      |
-| `BACKEND_URL`      | No       | `http://localhost:8000`| Used by the Streamlit frontend to reach the API.|
-
-**Without `OPENAI_API_KEY`**, the system still works end-to-end: the planner
-falls back to deterministic keyword matching (`agent/intent_rules.py`) and
-the explanation tool falls back to a template-based summary
-(`tools/explanation_tool.py`). This is intentional so the project is always
-demoable, even with no internet access to OpenAI.
-
-## How to Obtain an OpenAI API Key
-
-1. Go to <https://platform.openai.com/signup> and create an account (or log in).
-2. Navigate to <https://platform.openai.com/api-keys>.
-3. Click **"Create new secret key"**, name it (e.g. `aml-hackathon`), and copy it immediately — it's shown only once.
-4. Add billing details under **Settings → Billing** if you haven't already (a few dollars of credit is enough for a hackathon demo).
-5. Paste the key into your `.env` file as `OPENAI_API_KEY=sk-...`.
 
 ## Running the Backend
 
@@ -165,138 +250,114 @@ demoable, even with no internet access to OpenAI.
 cd backend
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
-
-- API docs (Swagger UI): <http://localhost:8000/docs>
+- Swagger docs: http://localhost:8000/docs
 - Health check: `GET http://localhost:8000/health`
 
 ## Running the Frontend
 
-In a second terminal (with the same virtual environment activated):
-
+In a second terminal:
 ```bash
 cd frontend
-streamlit run app.py
+npm run dev
 ```
+Opens at **http://localhost:5173**. The dev server proxies `/api/*` to
+`http://localhost:8000` automatically (see `vite.config.ts`) — the
+browser only ever talks to one origin, so there's no CORS configuration
+to worry about during development.
 
-This opens the dashboard at <http://localhost:8501>. Make sure the backend
-is running first — the sidebar's **Settings → Check backend health** button
-confirms connectivity.
-
-## Running with the Sample Dataset
-
-A ready-made synthetic dataset with **deliberately injected suspicious
-patterns** (structuring, layering, circular transfers, dormant-then-active,
-high velocity, large-amount anomalies, unusual recipient counts) lives at
-`sample_data/transactions.csv`. Regenerate it anytime with:
-
+**Production build:**
 ```bash
-python sample_data/generate_sample_data.py
+npm run build      # outputs frontend/dist — tsc -b runs first, so type errors fail the build
+npm run preview    # serve the production build locally
+```
+For a production deployment where the frontend and backend are on
+different origins/hosts, set `VITE_API_BASE_URL` (in `frontend/.env`) to
+the backend's full URL before building, e.g.
+`VITE_API_BASE_URL=https://api.yourcompany.com`.
+
+## Training Models
+
+The Isolation Forest is trained **once per uploaded dataset** and cached
+server-side (`utils/model_store.py`) — it is not refit on every query.
+From the UI: **Dashboard → Upload Dataset → Train / Retrain Model**. From
+the API directly:
+```bash
+curl -X POST "http://localhost:8000/train?dataset_id=<id>"
 ```
 
-To demo:
-1. Start backend + frontend as above.
-2. On the **Upload Dataset** page, upload `sample_data/transactions.csv`.
-3. Go to **Dashboard** → click **Run Full Risk Pipeline**.
-4. Try the **Chat** page with: *"find suspicious customers"*, *"show
-   structuring"*, *"explain customer C901"*, *"average transaction amount"*.
-5. On **Network Graph**, look up `C910` with 2 hops to see the injected
-   circular-transfer ring (`C910 → C911 → C912 → C910`).
+## Using Existing Models
 
-## How the Agent Works
+Because the model cache is keyed by `dataset_id` and lives in the
+backend process's memory, re-uploading the exact same CSV in the same
+running backend session will re-register a **new** `dataset_id` (and
+therefore require training again) — the cache is intentionally
+per-upload, not per-file-hash, to keep the in-memory demo store simple.
+Within a single dataset's session, every `/chat`, `/risk-report`, and
+`/customer/{id}` call automatically reuses the cached model — check
+`GET /model/status?dataset_id=<id>` any time to confirm
+`"trained": true` and see `trained_at`.
 
-`agent/planner.py` is the **single** planning agent in this system (by
-design — no multi-agent orchestration). For every user query it:
+## API Endpoints
 
-1. Sends the query + a tool catalogue to the LLM in JSON mode.
-2. Parses the returned plan: `intent`, `tools`, `filters`, `customer_id`, `reasoning`.
-3. Validates that every tool name is real (drops hallucinated tool names).
-4. If the LLM is unavailable or returns invalid JSON, falls back to
-   `agent/intent_rules.py`, a deterministic keyword matcher, so the agent
-   never fully breaks.
-
-`tools/executor.py` then expands the plan with any missing prerequisite
-tools (e.g. `risk_score` requires `rules` + `ml`, which require `features`)
-and executes **only** that resolved chain — this is what makes the system
-dynamic rather than a fixed sequential pipeline. Asking *"average
-transaction amount"* runs only the EDA tool; asking *"find suspicious
-customers"* runs the full features → rules → ML → risk → explanation chain.
-
-## How the Rules Work
-
-`tools/rule_engine.py` implements nine deterministic, explainable AML
-rules, each returning a `(customer_id, score, reason)` hit:
-
-| Rule | Signal |
-|---|---|
-| Structuring | Many transactions just under a reporting threshold (₹10,000) |
-| Many small transfers | High count of low-value transfers |
-| High velocity | Too many transactions within any 1-hour window |
-| Rapid P2P | Multiple distinct recipients within a 30-minute window (sliding window) |
-| Layering | Incoming funds forwarded onward within 2 hours to a different party |
-| Dormant → active | ≥30 day gap in activity followed by a burst |
-| Circular transfers | Graph cycles (A→B→...→A) detected with NetworkX `simple_cycles` |
-| Large amount anomaly | A transaction far above the customer's own historical average (z-score) |
-| Unusual recipient count | Beneficiary count far above the typical customer |
-
-All thresholds are named constants at the top of `rule_engine.py` for easy
-tuning per jurisdiction.
-
-## How the ML Model Works
-
-`tools/ml_tool.py` fits a scikit-learn **Isolation Forest** over the
-per-customer feature table produced by `tools/feature_engineering.py`
-(transaction frequency, rolling sums/averages, velocity, unique
-beneficiaries, structuring ratio, etc). The model's `decision_function`
-output is inverted and min-max normalized to a `ml_score` in `[0, 1]`
-(1 = most anomalous), catching patterns that don't match any hand-written
-rule.
-
-## How Risk Scoring Works
-
-`tools/risk_scoring.py` combines both signals per customer:
-
-```
-final_score = 0.6 * rule_score + 0.4 * ml_score
-```
-
-| final_score | Label |
-|---|---|
-| ≥ 0.65 | **High** |
-| 0.35 – 0.64 | **Medium** |
-| < 0.35 | **Low** |
-
-`tools/explanation_tool.py` then turns the top flagged customers' rule hits
-and score into a plain-language explanation + recommendation (LLM-generated
-when available, template-based otherwise).
-
-## API Reference
-
-| Method | Path | Description |
-|---|---|---|
-| `GET`  | `/health` | Health check |
-| `POST` | `/upload` | Upload a transaction CSV (multipart form, field `file`) |
-| `POST` | `/chat` | `{query, dataset_id}` → agent plan + tool results |
-| `POST` | `/eda` | Direct EDA-only call, bypassing the planner |
-| `POST` | `/risk-report` | Runs the full features→rules→ml→risk→explanation pipeline |
-| `GET`  | `/customer/{customer_id}` | Full drill-down for one customer |
-| `GET`  | `/graph/{customer_id}` | Transaction graph (nodes/edges) around one customer |
-
-Full interactive docs at `/docs` once the backend is running.
+| Method | Path | Added in | Description |
+|---|---|---|---|
+| `GET`  | `/health` | v1 | Health check |
+| `POST` | `/upload` | v1 | Upload a transaction CSV |
+| `POST` | `/chat` | v1 | Natural-language query → agent plan (goal+steps) → tool results |
+| `POST` | `/eda` | v1 | Direct EDA-only call, bypassing the planner |
+| `POST` | `/risk-report` | v1 | Full features→graph→rules→ml→risk→explanation pipeline |
+| `POST` | `/train` | v2 | Explicitly (re)trains and caches the Isolation Forest |
+| `GET`  | `/customer/{id}` | v1 | Full drill-down for one customer, incl. history delta |
+| `GET`  | `/timeline/{id}` | v2 | Investigation Timeline (chronological events + caption) |
+| `GET`  | `/history/{id}` | v2 | Past risk-score snapshots for one customer |
+| `GET`  | `/graph/{id}` | v1 | Transaction graph (nodes/edges) around one customer |
+| `GET`  | `/dataset/summary` | **v3** | Dataset-level counts for the Dashboard |
+| `GET`  | `/system/status` | **v3** | Planner/rule-engine status + rule importance weights |
+| `GET`  | `/model/status` | **v3** | Isolation Forest cache status + feature columns |
 
 ## Screenshots
 
 > _Add screenshots here after running the app locally:_
 > - `docs/screenshots/dashboard.png`
-> - `docs/screenshots/chat.png`
-> - `docs/screenshots/network_graph.png`
+> - `docs/screenshots/investigation.png`
 > - `docs/screenshots/customer_details.png`
+> - `docs/screenshots/analytics.png`
+> - `docs/screenshots/model_insights.png`
 
 ## Future Improvements
 
-- Persist datasets and risk reports to a real database (Postgres) instead of in-memory storage.
-- Add authentication/authorization for compliance analysts.
-- Support streaming LLM responses in the Chat page.
-- Add a supervised model trained on labeled SAR (Suspicious Activity Report) outcomes to complement the unsupervised Isolation Forest.
-- Add configurable rule thresholds via the Settings page instead of source constants.
-- Batch/async processing for very large transaction volumes (Dask/Spark backend for `pandas`).
-- Multi-currency normalization for the structuring threshold.
+- Replace the in-memory dataset/model/history stores with Postgres + object storage for real persistence across backend restarts.
+- Add authentication (the current build has no auth layer — add one before any real deployment).
+- Server-Sent Events or WebSocket streaming for the Investigation page so long-running LLM calls show incremental progress.
+- A dedicated `/customers` list endpoint (paginated) instead of deriving "top customers" from a full `/risk-report` call on the frontend.
+- Real shadcn CLI components once network access to the component registry is available, as a drop-in replacement for the hand-authored primitives.
+- E2E browser tests (Playwright) once a Chromium download path is available in the build environment — currently verified via `tsc -b`, `npm run build`, ESLint, and live HTTP round-trip tests against the running backend through the Vite dev proxy.
+
+## Dataset Citation
+
+`sample_data/transactions.csv` is **entirely synthetic**, generated by
+`sample_data/generate_sample_data.py` specifically for this project — it
+is not derived from any real bank, customer, or third-party dataset, and
+requires no external citation. It contains ~2,200 transactions across 166
+synthetic customers, with eleven deliberately injected suspicious
+patterns (one per detection rule) so every rule in the pipeline has
+something to find out of the box.
+
+## Hackathon Notes
+
+- The **entire AI pipeline is unchanged from the pre-frontend-rewrite
+  version** — same planner, same 16 rules, same Isolation Forest, same
+  risk scoring math. This rewrite is a frontend modernization only, as
+  requested; nothing here should be read as an AI/ML capability claim
+  beyond what was already implemented and tested (34 passing pytest
+  cases) before this rewrite.
+- The Model Insights page deliberately does **not** show a Random Forest,
+  ROC curve, or confusion matrix, because this pipeline has no supervised
+  labeled data and no Random Forest model — fabricating those charts
+  would misrepresent the system. What's shown instead (Isolation Forest
+  config, live anomaly-score distribution, rule importance weights, rule
+  trigger frequency) is all real, computed from the actual loaded dataset.
+- Runs fully offline: with no `OPENAI_API_KEY` set, the planner falls back
+  to deterministic keyword matching and the explanation engine falls back
+  to a template — the whole system, frontend included, remains fully
+  functional and demoable without any external API access.
