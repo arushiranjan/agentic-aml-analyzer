@@ -1,0 +1,77 @@
+# Eco-Loop Building Agents — Backend dependencies
+#
+# Target interpreter: Python 3.11 (see README "Installation" / SETUP_GUIDE.md).
+# Do NOT install on Python 3.13 — some pins below (notably the
+# langgraph/langchain-core/mcp/fastmcp stack) are validated against 3.11/3.12
+# only.
+#
+# This whole set was verified with a clean `pip install -r requirements.txt`
+# (no ResolutionImpossible / conflicting-dependency errors) on 2026-07-26.
+# The versions are pinned deliberately, not guessed — see the comments below
+# for the specific cross-package constraints that drove each pin.
+
+# ------------------------------------------------------------------
+# Web framework
+# ------------------------------------------------------------------
+fastapi==0.115.6
+# fastapi 0.115.6 requires starlette>=0.40.0,<0.42.0 — resolved automatically,
+# left unpinned here so pip can pick the exact compatible patch (0.41.3).
+uvicorn[standard]==0.34.0
+
+# ------------------------------------------------------------------
+# Data validation / settings
+# ------------------------------------------------------------------
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# ------------------------------------------------------------------
+# Database
+# ------------------------------------------------------------------
+sqlalchemy==2.0.36
+
+# ------------------------------------------------------------------
+# Config loading
+# fastmcp>=2.3.4 requires python-dotenv>=1.1.0 — 1.0.1 (the old pin) conflicts
+# with it and is why `pip install` used to fail. Bumped to 1.1.0 to satisfy
+# both fastmcp and pydantic-settings' .env loading.
+# ------------------------------------------------------------------
+python-dotenv==1.1.0
+
+# ------------------------------------------------------------------
+# Real EnergyPlus (CSV parsing)
+# ------------------------------------------------------------------
+pandas==2.2.3
+
+# ------------------------------------------------------------------
+# Real FastMCP server
+# fastmcp==2.3.4 requires mcp>=1.8.1,<2.0.0 — the old pin (mcp==1.6.0)
+# conflicts with that range and was the other cause of the original
+# ResolutionImpossible error. Bumped to 1.9.4, which satisfies fastmcp's
+# range and is itself compatible with httpx==0.28.1 below.
+# ------------------------------------------------------------------
+fastmcp==2.3.4
+mcp==1.9.4
+
+# ------------------------------------------------------------------
+# Real LangGraph (0.2.x line — matches the StateGraph/TypedDict API used
+# in app/agents/graph.py; the 1.x line changed that API and would require
+# rewriting the agent graph, which is out of scope here).
+# langgraph==0.2.62 requires langchain-core>=0.2.43,<0.4 — 0.3.29 satisfies
+# that and matches the langchain-core API app/agents/graph.py is written
+# against.
+# ------------------------------------------------------------------
+langgraph==0.2.62
+langchain-core==0.3.29
+
+# ------------------------------------------------------------------
+# Shared HTTP client
+# httpx==0.28.1 satisfies both fastmcp (>=0.28.1) and the ollama client
+# (no upper pin) — one version serves every consumer in this project.
+# ------------------------------------------------------------------
+httpx==0.28.1
+
+# ------------------------------------------------------------------
+# Real Ollama integration (Part 2)
+# Official sync/async Python client for the Ollama HTTP API.
+# ------------------------------------------------------------------
+ollama==0.6.2
