@@ -3,7 +3,12 @@ generate_sample_data.py
 ------------------------
 Creates sample_data/transactions.csv: a synthetic banking transaction
 dataset with normal traffic PLUS deliberately injected suspicious
-patterns so every rule in tools/rule_engine.py has something to find.
+patterns so every rule in tools/rule_engine.py and tools/graph_intelligence.py
+has something to find.
+
+Includes two OPTIONAL columns (device_id, merchant_category) to
+demonstrate the optional device_anomaly / merchant_anomaly rules, which
+only activate when those columns are present in the uploaded CSV.
 
 Run:  python sample_data/generate_sample_data.py
 """
@@ -18,6 +23,8 @@ np.random.seed(42)
 
 COUNTRIES = ["India", "UAE", "Singapore", "UK", "USA", "Nigeria"]
 CHANNELS = ["NEFT", "IMPS", "UPI", "SWIFT", "RTGS", "Cash Deposit"]
+MERCHANT_CATEGORIES = ["Groceries", "Utilities", "Travel", "Electronics", "Dining",
+                        "Fuel", "Healthcare", "Entertainment", "Jewelry", "Crypto Exchange"]
 
 START = pd.Timestamp("2025-01-01")
 END = pd.Timestamp("2025-03-31")
@@ -26,7 +33,8 @@ rows = []
 txn_counter = 1
 
 
-def add_txn(customer_id, beneficiary_id, amount, timestamp, country=None, channel=None):
+def add_txn(customer_id, beneficiary_id, amount, timestamp, country=None, channel=None,
+            device_id=None, merchant_category=None):
     global txn_counter
     rows.append({
         "transaction_id": f"T{txn_counter:06d}",
@@ -36,6 +44,8 @@ def add_txn(customer_id, beneficiary_id, amount, timestamp, country=None, channe
         "timestamp": timestamp,
         "country": country or random.choice(COUNTRIES),
         "channel": channel or random.choice(CHANNELS),
+        "device_id": device_id or f"DEV-{random.randint(1, 3):02d}-{customer_id}",
+        "merchant_category": merchant_category or random.choice(MERCHANT_CATEGORIES),
     })
     txn_counter += 1
 
@@ -71,7 +81,7 @@ for i in range(9):
     ts = base_time + pd.Timedelta(minutes=i * 5)
     add_txn("C903", beneficiary, amount, ts)
 
-# ---------------------------------------------------------------- 4. Layering (C904 -> C905 -> C906)
+# ---------------------------------------------------------------- 4. Layering + money mule (C904 -> C905 -> C906)
 base_time = random_timestamp()
 add_txn("C800", "C904", 500000, base_time)
 add_txn("C904", "C905", 480000, base_time + pd.Timedelta(minutes=20))
@@ -96,10 +106,35 @@ for _ in range(10):
     add_txn("C930", f"B{random.randint(700, 710):03d}", random.uniform(3000, 9000), random_timestamp())
 add_txn("C930", "B999", 950000, random_timestamp())  # sudden huge outlier
 
-# ---------------------------------------------------------------- 8. Unusual recipient count (C940)
+# ---------------------------------------------------------------- 8. Unusual recipient count / hub account (C940)
 base_time = random_timestamp()
 for i in range(12):
     add_txn("C940", f"B{800+i:03d}", random.uniform(5000, 15000), base_time + pd.Timedelta(hours=i))
+
+# ---------------------------------------------------------------- 9. Transaction burst at an odd hour (C950)
+base_time = pd.Timestamp("2025-02-10 02:00:00")  # 2 AM
+for i in range(7):
+    add_txn("C950", f"B{random.randint(900, 910):03d}", random.uniform(1000, 4000),
+            base_time + pd.Timedelta(seconds=i * 40))
+
+# ---------------------------------------------------------------- 10. Geo anomaly (C960): 4 countries in <2 hours
+base_time = random_timestamp()
+geo_sequence = ["India", "UAE", "Singapore", "Nigeria"]
+for i, country in enumerate(geo_sequence):
+    add_txn("C960", f"B{950+i:03d}", random.uniform(20000, 60000),
+            base_time + pd.Timedelta(minutes=i * 30), country=country)
+
+# ---------------------------------------------------------------- 11. Device anomaly (C970): 5 distinct devices
+base_time = random_timestamp()
+for i in range(6):
+    add_txn("C970", f"B{960+i:03d}", random.uniform(5000, 15000),
+            base_time + pd.Timedelta(hours=i), device_id=f"DEV-{i:02d}-C970")
+
+# ---------------------------------------------------------------- 12. Merchant anomaly (C980): 6 unrelated categories fast
+base_time = random_timestamp()
+for i, cat in enumerate(["Jewelry", "Crypto Exchange", "Electronics", "Travel", "Fuel", "Healthcare"]):
+    add_txn("C980", f"B{970+i:03d}", random.uniform(8000, 20000),
+            base_time + pd.Timedelta(hours=i), merchant_category=cat)
 
 df = pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
 
