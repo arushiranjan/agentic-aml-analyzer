@@ -60,14 +60,26 @@ def customer_statistics(df: pd.DataFrame, customer_id: Optional[str] = None) -> 
 
 
 def distribution_data(df: pd.DataFrame, filters: Optional[Dict] = None) -> Dict[str, Any]:
-    """Data shaped for Plotly histograms/timelines in the frontend."""
+    """Data shaped for Plotly/Recharts histograms/timelines/breakdowns in the frontend."""
     data = apply_filters(df, filters)
     hist, edges = np.histogram(data["amount"].clip(upper=data["amount"].quantile(0.99)), bins=30)
     daily = data.set_index("timestamp").resample("D").size()
-    return {
+    hourly = data["timestamp"].dt.hour.value_counts().sort_index()
+
+    result = {
         "amount_histogram": {"counts": hist.tolist(), "bin_edges": edges.tolist()},
         "daily_txn_counts": {"dates": [str(d.date()) for d in daily.index], "counts": daily.tolist()},
+        "hourly_txn_counts": {"hours": hourly.index.tolist(), "counts": hourly.tolist()},
     }
+    # These columns are optional depending on the uploaded schema — included only when present,
+    # so this stays purely additive and never breaks on a minimal CSV.
+    if "channel" in data.columns:
+        vc = data["channel"].value_counts()
+        result["channel_counts"] = {"labels": vc.index.tolist(), "counts": vc.tolist()}
+    if "country" in data.columns:
+        vc = data["country"].value_counts()
+        result["country_counts"] = {"labels": vc.index.tolist(), "counts": vc.tolist()}
+    return result
 
 
 def apply_filters(df: pd.DataFrame, filters: Optional[Dict]) -> pd.DataFrame:

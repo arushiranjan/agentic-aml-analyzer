@@ -4,9 +4,16 @@ executor.py
 Runs ONLY the tools that the AI Planner decided are needed, in the
 correct dependency order, and merges their outputs into one response.
 
+Architecture: Planner -> Context Builder -> Executor. This module
+receives an already-built agent.context_builder.ExecutionContext (filters
+applied, customer_id resolved) rather than raw df/filters/customer_id —
+individual tools stay simple ("give me a dataframe") and any new tool
+added later doesn't need to re-implement filter/customer-resolution logic.
+
 Dependency rules:
-  - rules, ml need -> features
-  - risk_score needs -> rules + ml
+  - rules       needs -> features, graph   (graph hits get merged into rule scoring)
+  - ml          needs -> features
+  - risk_score  needs -> rules, ml
   - explanation needs -> risk_score
 
 The executor auto-adds prerequisite tools even if the planner forgot
@@ -15,15 +22,18 @@ them, so a plan like ["risk_score"] still works correctly.
 
 from __future__ import annotations
 from typing import Any, Dict, List
-import pandas as pd
 
-from tools import eda_tool, feature_engineering, rule_engine, ml_tool, risk_scoring, explanation_tool
+from agent.context_builder import ExecutionContext
+from tools import (
+    eda_tool, feature_engineering, rule_engine, ml_tool,
+    risk_scoring, explanation_tool, graph_intelligence,
+)
 
-# Declares what each tool needs before it can run
 DEPENDENCIES = {
     "eda": [],
     "features": [],
-    "rules": ["features"],
+    "graph": [],
+    "rules": ["features", "graph"],
     "ml": ["features"],
     "risk_score": ["rules", "ml"],
     "explanation": ["risk_score"],
@@ -46,35 +56,39 @@ def resolve_order(requested_tools: List[str]) -> List[str]:
     return resolved
 
 
-def execute(df: pd.DataFrame, tools: List[str], filters: Dict[str, Any] = None,
-            customer_id: str = None) -> Dict[str, Any]:
+def execute(context: ExecutionContext, tools: List[str], force_retrain: bool = False) -> Dict[str, Any]:
     """
-    Runs the resolved tool chain and returns a merged results dict.
-    Only tools that were actually requested (or required as a dependency)
-    execute — this is what makes the agent "dynamic" rather than a fixed
-    sequential pipeline.
+    Runs the resolved tool chain against the given context and returns a
+    merged results dict. Only tools that were actually requested (or
+    required as a dependency) execute — this is what makes the agent
+    "dynamic" rather than a fixed sequential pipeline.
     """
-    filters = filters or {}
     order = resolve_order(tools)
     results: Dict[str, Any] = {"tools_executed": order}
 
     features_df = None
+    graph_hits: List[Dict[str, Any]] = []
 
     for tool in order:
         if tool == "eda":
-            results["eda"] = eda_tool.run(df, filters)
+            results["eda"] = eda_tool.run(context.scoped_df)
 
         elif tool == "features":
-            out = feature_engineering.run(df)
+            out = feature_engineering.run(context.full_df)
             features_df = out.pop("_df")
             results["features"] = out
 
+        elif tool == "graph":
+            graph_out = graph_intelligence.run(context.full_df)
+            graph_hits = graph_out.get("graph_hits", [])
+            results["graph"] = graph_out
+
         elif tool == "rules":
-            rule_out = rule_engine.run(df, features_df)
+            rule_out = rule_engine.run(context.full_df, features_df, extra_hits=graph_hits)
             results["rules"] = rule_out
 
         elif tool == "ml":
-            ml_out = ml_tool.run(features_df)
+            ml_out = ml_tool.run(features_df, dataset_id=context.dataset_id, force_retrain=force_retrain)
             results["ml"] = ml_out
 
         elif tool == "risk_score":
@@ -88,14 +102,18 @@ def execute(df: pd.DataFrame, tools: List[str], filters: Dict[str, Any] = None,
             exp_out = explanation_tool.run(results.get("risk_score", {}).get("risk_report", []))
             results["explanation"] = exp_out
 
-    # Optional: scope the final risk_score / explanation to one customer for "Explain customer X"
-    if customer_id and "risk_score" in results:
-        report = results["risk_score"].get("risk_report", [])
-        scoped = [r for r in report if str(r["customer_id"]) == str(customer_id)]
-        results["risk_score"]["risk_report"] = scoped
-        if "explanation" in results:
-            results["explanation"]["explanations"] = [
-                e for e in results["explanation"]["explanations"] if str(e["customer_id"]) == str(customer_id)
-            ]
+    # Scope the final risk_score / explanation to one customer for "Explain customer X"
+    if context.customer_id:
+        if not context.customer_exists:
+            results["warning"] = f"Customer '{context.customer_id}' was not found in this dataset."
+        if "risk_score" in results:
+            report = results["risk_score"].get("risk_report", [])
+            scoped = [r for r in report if str(r["customer_id"]) == str(context.customer_id)]
+            results["risk_score"]["risk_report"] = scoped
+            if "explanation" in results:
+                results["explanation"]["explanations"] = [
+                    e for e in results["explanation"]["explanations"]
+                    if str(e["customer_id"]) == str(context.customer_id)
+                ]
 
     return results
